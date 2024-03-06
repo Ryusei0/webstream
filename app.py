@@ -26,8 +26,8 @@ logging.basicConfig(level=logging.INFO)  # INFOレベル以上のログを出力
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
-CORS(app,resources={r"/api/*": {"origins": "*"}})
-socketio = SocketIO(app)
+CORS(app)
+socketio = SocketIO(app, cors_allowed_origins="*")
 
 
 openai.api_key = os.environ['OPENAI_API_KEY']
