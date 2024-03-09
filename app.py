@@ -10,7 +10,7 @@ import openai
 from langchain.chat_models import ChatOpenAI
 import azure.cognitiveservices.speech as speechsdk
 import asyncio
-from flask import Flask, render_template, request, send_file, abort, send_from_directory
+from flask import Flask, render_template, request, send_file, abort, send_from_directory,request, Response
 from flask_socketio import SocketIO
 import base64
 from flask_cors import CORS
@@ -20,6 +20,7 @@ import uuid
 import os
 from threading import Timer
 import logging
+from queue import Queue
 
 logging.basicConfig(level=logging.INFO)  # INFOレベル以上のログを出力
 
@@ -34,17 +35,26 @@ openai.api_key = os.environ['OPENAI_API_KEY']
 azure_speech_key = os.environ['SPEECH_KEY']
 azure_service_region = os.environ['SERVICE_REGION_KEY']
 
-@socketio.on('connect')
-def handle_connect():
-    logger.info(f'Client connected: {request.sid}')
+listeners = []  # クライアントのリスナーを追跡
 
-@socketio.on('disconnect')
-def handle_disconnect():
-    logger.info(f'Client disconnected: {request.sid}')
+def send_audio_url_to_client(url):
+    for listener in listeners:
+        listener.send(url)
 
-@socketio.on_error()  # エラーハンドリング
-def error_handler(e):
-    logger.error(f'Error: {str(e)}')
+@app.route('/events')
+def events():
+    def stream():
+        message_queue = Queue()
+        listeners.append(message_queue)
+        try:
+            while True:
+                message = message_queue.get()
+                yield f"data: {json.dumps({'url': message})}\n\n"
+        except GeneratorExit:  # クライアント接続が閉じた場合
+            listeners.remove(message_queue)
+
+    return Response(stream(), content_type='text/event-stream')
+
 
 
 def delete_file(path):
@@ -99,15 +109,15 @@ def dummy_callback(token):
     buffered_text += token
     print(f'callback>> \033[36m{token}\033[0m', end='')
     
-    if token.endswith("。"):
+    if token.endswith("。"):  # 日本語のピリオドに注意
         print("\nToken ends with a period. Generating audio...")
         result, output_filename = text_to_speech(buffered_text)
         buffered_text = ""  # バッファをクリア
         print(f"Generated audio file: {output_filename}")
-        # 音声ファイルのURLをクライアントに送信
+        # 音声ファイルのURLを生成（後ほどクライアントに送信）
         audio_url = request.url_root + 'audio/' + output_filename
-        socketio.emit('audio_ready', {'audio_url': audio_url})
-        print("Emitted audio_ready event with audio URL.")
+        send_audio_url_to_client(audio_url)
+
 
 def get_chain(callback_streaming=None):
     callback_manager = CallbackManager([MyCustomCallbackHandler(callback_streaming)])
@@ -166,12 +176,15 @@ def openai_qa(query, callback_streaming=None):
     print(f"LLM response: {response}")
     return response
 
-@socketio.on('synthesize_text')
-def handle_message(data):
-    query = data['text']
+@app.route('/text', methods=['POST'])
+def handle_message():
+    data = request.json  # JSON形式のデータを解析
+    query = data.get('text')  # 'text'キーでテキストデータを取得
+    if not query:
+        return "No text provided", 400
     print(f"Handling synthesize_text event for text: {query}")
-    openai_qa(query, dummy_callback)
+    response = openai_qa(query, dummy_callback)
+    return json.dumps({"response": response}), 200
 
 if __name__ == '__main__':
-    print("Starting server with SocketIO...")
-    socketio.run(app, debug=True)
+    app.run(debug=True)
