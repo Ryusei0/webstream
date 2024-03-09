@@ -10,7 +10,7 @@ import openai
 from langchain.chat_models import ChatOpenAI
 import azure.cognitiveservices.speech as speechsdk
 import asyncio
-from flask import Flask, render_template, request, send_file, abort, send_from_directory,request, Response
+from flask import Flask, render_template, request, jsonify, send_from_directory,request, Response
 from flask_socketio import SocketIO
 import base64
 from flask_cors import CORS
@@ -38,8 +38,8 @@ azure_service_region = os.environ['SERVICE_REGION_KEY']
 listeners = []  # クライアントのリスナーを追跡
 
 def send_audio_url_to_client(url):
-    for listener in listeners:
-        listener.send(url)
+    for message_queue in listeners:
+        message_queue.put(url)  # 各リスナーのキューにURLを追加
 
 @app.route('/events')
 def events():
@@ -183,8 +183,21 @@ def handle_message():
     if not query:
         return "No text provided", 400
     print(f"Handling synthesize_text event for text: {query}")
-    response = openai_qa(query, dummy_callback)
-    return json.dumps({"response": response}), 200
+    # ここで、AIMessageオブジェクトを生成する処理を行う
+    try:
+        # 例: response = openai_qa(query, dummy_callback) のような処理
+        response = openai_qa(query, dummy_callback)
+
+        # AIMessageオブジェクトから必要な情報を抽出
+        response_data = {
+            "content": response.content  # ここではresponseが持つcontent属性を使用しています
+        }
+        return jsonify(response_data), 200
+    except Exception as e:
+        # エラーメッセージをログに記録
+        print(f"Error processing request: {e}")
+        # JSONシリアライズ可能な形式でエラーレスポンスを返す
+        return jsonify({"error": "Internal server error"}), 500
 
 if __name__ == '__main__':
     app.run(debug=True)
