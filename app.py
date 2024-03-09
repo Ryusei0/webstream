@@ -40,22 +40,24 @@ listeners = []  # クライアントのリスナーを追跡
 def send_audio_url_to_client(url):
     for message_queue in listeners:
         message_queue.put(url)  # 各リスナーのキューにURLを追加
+        logger.info(f"URL {url} added to queue")  # ログ出力
+
 
 @app.route('/events')
 def events():
     def stream():
         message_queue = Queue()
         listeners.append(message_queue)
+        logger.info("New listener added")  # リスナー追加のログ出力
         try:
             while True:
                 message = message_queue.get()
                 yield f"data: {json.dumps({'url': message})}\n\n"
         except GeneratorExit:  # クライアント接続が閉じた場合
             listeners.remove(message_queue)
+            logger.info("Listener removed")  # リスナー削除のログ出力
 
     return Response(stream(), content_type='text/event-stream')
-
-
 
 def delete_file(path):
     """指定されたファイルを削除する関数、ファイルが存在する場合のみ"""
